@@ -1,0 +1,506 @@
+<!doctype html>
+ 
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    
+    <title>ZeldaLike</title>
+    <meta name="description" content="カーソルキーで移動" />
+    
+    <style>*, *:before, *:after {
+  box-sizing: border-box; 
+}
+html {
+  font-size: 62.5%;
+}
+body {
+  color: #444;
+  background-color: hsl(0, 0%, 96%);
+}
+h1 {
+  font-size: 1.8rem;
+}
+
+</style>
+  </head>
+  <body>
+    <script src="https://cdn.jsdelivr.net/gh/phinajs/phina.js@v0.2.3/build/phina.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/alkn203/phina-extensions@master/util/map.js"></script>
+    <script>// グローバルに展開
+phina.globalize();
+// スプライトシート
+var SPRITE_SHEET = {
+  "tomapiko_ss": {
+    // フレーム情報
+    "frame": {
+      // 1フレームの画像サイズ（横）
+      "width": 64,
+      // 1フレームの画像サイズ（縦）
+      "height": 64,
+      // フレーム数（横）
+      "cols": 6,
+      // フレーム数（縦）
+      "rows": 3,
+    },
+    // アニメーション情報
+    "animations": {
+      // アニメーション名
+      "left": {
+        // フレーム番号範囲
+        "frames": [12,13,14],
+        // 次のアニメーション
+        "next": "left",
+        // アニメーション間隔
+        "frequency": 4,
+      },
+      "right": { 
+        "frames": [15,16,17], 
+        "next": "right", 
+        "frequency": 4, 
+      },
+      "up": { 
+        "frames": [9,10,11], 
+        "next": "up", 
+        "frequency": 4, 
+      },
+      "down": { 
+        "frames": [6,7,8], 
+        "next": "down",
+        "frequency": 4,
+      },
+      "defeat": { 
+        "frames": [4,5], 
+        "frequency": 8,
+      },
+    }
+  },
+};
+// アセット
+var ASSETS = {
+  // 画像
+  image: {
+    'tomapiko': 'https://cdn.jsdelivr.net/gh/phinajs/phina.js@develop/assets/images/tomapiko_ss.png',
+    'sword': 'https://cdn.jsdelivr.net/gh/alkn203/zeldalike@master/assets/sword.png',
+    'shield': 'https://cdn.jsdelivr.net/gh/alkn203/zeldalike@master/assets/shield.png',
+    'boomerang': 'https://cdn.jsdelivr.net/gh/alkn203/zeldalike@master/assets/boomerang.png',
+    'arrow': 'https://cdn.jsdelivr.net/gh/alkn203/zeldalike@master/assets/arrow.png',
+  },
+  // スプライトシート
+  spritesheet: SPRITE_SHEET
+};
+// 定数
+var GRID_SIZE = 64;
+var GRID_HALF = GRID_SIZE / 2;
+// キー方向配列
+var KEY_ARR = [['left', -1, 0], ['right', 1, 0], ['up', 0, -1], ['down', 0, 1]];
+/*
+ * メインシーン
+ */
+phina.define("MainScene", {
+  // 継承
+  superClass: 'DisplayScene',
+  // コンストラクタ
+  init: function() {
+    // 親クラス初期化
+    this.superInit();
+    // グリッド
+    this.gx = Grid(640, 10);
+    this.gy = Grid(960, 15);
+    // 背景色
+    this.backgroundColor = 'black';
+    // グループ
+    this.boomerangGroup = DisplayElement().addChildTo(this);
+    this.arrowGroup = DisplayElement().addChildTo(this);
+    
+    this.player =  Player().addChildTo(this).setPosition(320, 480);
+    
+    this.target = RectangleShape().addChildTo(this).setPosition(320, 320);
+  },
+  // 毎フレーム処理  
+  update: function(app) {
+    
+    this.checkMove(app);
+    this.hitTestSword();
+  },
+  // 移動チェック
+  checkMove: function(app) {
+    var player = this.player;
+    var self = this;
+      
+    var key = app.keyboard;
+    // キー入力チェック
+    if (key.getKeyDown('Z')) {
+      //
+      player.swordAttack();
+    }
+    //
+    if (key.getKeyDown('X')) {
+      //
+      Boomerang(player).addChildTo(this.boomerangGroup);
+    }
+    //
+    if (key.getKeyDown('A')) {
+      //
+      Arrow(player).addChildTo(this.arrowGroup);
+    }
+    // 移動判定
+    KEY_ARR.each(function(elem) {
+      var sprite = player.sprite;
+      var e0 = elem[0];
+      var e1 = elem[1];
+      var e2 = elem[2];
+      var dx = e1 * player.speed;
+      var dy = e2 * player.speed;
+      // キーが離れたらアニメーションストップ
+      if (key.getKeyUp(e0)) {
+        sprite.anim.gotoAndStop(sprite.anim.currentAnimationName);
+        return;
+      }
+      // キー入力チェック
+      if (key.getKey(e0)) {
+        // アニメーション変更
+        sprite.anim.gotoAndPlay(e0);
+        // キー同時入力対策
+        var x = key.getKeyDirection().x;
+        var y = key.getKeyDirection().y;
+        if (Math.abs(x * y) !== 0) return;
+        //
+        player.showShield();
+        // 次の移動先矩形
+        var rx = player.left + dx;
+        var ry = player.top + dy;
+        var rect = Rect(rx, ry, player.width, player.height);
+        // プレイヤー移動
+        player.moveBy(dx, dy);
+      }
+    });
+  },
+  // 剣との当たり判定
+  hitTestSword: function() {
+    var sword = this.player.sword;
+    var tween1 = Tweener().set({fill: 'red'}).wait(100).set({fill: 'blue'});
+    //
+    if (sword.visible && !sword.hit) {
+      var rect = this.player.getAbsoluteSwordRect();
+      if (Collision.testRectRect(rect, this.target)) {
+        sword.hit = true;
+        console.log(1);
+        
+        var tween2 = Tweener().by({x: -GRID_SIZE * 1.5}, 200, 'easeOutCubic');
+        tween1.attachTo(this.target);
+        tween2.attachTo(this.target);
+      }
+    }
+  },
+  // プレイヤーの矩形とオブジェクトとの当たり判定
+  hitTestPlayerStatic: function(rect) {
+    var result = false;
+    var player = this.player;
+    
+    this.staticGroup.children.some(function(obj) {
+      // 当たり判定がある場合
+      if (Collision.testRectRect(rect, obj)) {
+        // 位置を補正してコーナーで移動しやすくする
+        // 左右から上下
+        if (obj.y < player.y || obj.y > player.y) {
+          if (player.x < obj.left) player.x = obj.x - GRID_SIZE;
+          if (player.x > obj.right) player.x = obj.x + GRID_SIZE;
+        }
+        // 上下から左右
+        if (obj.x < player.x || obj.x > player.x) {
+          if (player.y < obj.top) player.y = obj.y - GRID_SIZE;
+          if (player.y > obj.bottom) player.y = obj.y + GRID_SIZE;
+        }
+        result = true;
+        return true;
+      }
+    });
+    return result;
+  },
+});
+/*
+ * プレイヤークラス
+ */
+phina.define("Player", {
+  // 継承
+  superClass: 'DisplayElement',
+  // コンストラクタ
+  init: function() {
+    // 親クラス初期化
+    this.superInit();
+    // 配置レイヤー
+    this.underSword = DisplayElement().addChildTo(this);
+    this.underShield = DisplayElement().addChildTo(this);
+    this.body = DisplayElement().addChildTo(this);
+    this.overShield = DisplayElement().addChildTo(this);
+    this.overSword = DisplayElement().addChildTo(this);
+    // プレイヤースプライト
+    this.sprite = PlayerSprite().addChildTo(this.body);
+    // 移動速度
+    this.speed = 8;
+    // 盾
+    this.shield = Shield().addChildTo(this.underShield).setPosition(-10, 14);
+    // 剣
+    this.sword = Sword().addChildTo(this).setPosition(0, 8);
+    this.sword.setRotation(180).setOrigin(0.5, 1.0).hide();
+    this.sword.hit = false;
+    // 剣の当たり判定範囲
+    this.swordCollision = RectangleShape({
+      fill: null,
+    }).addChildTo(this).hide();
+  },
+  // 剣攻撃
+  swordAttack: function() {
+    var sword = this.sword;
+    var collision = this.swordCollision;
+    var anim = this.sprite.anim.currentAnimationName;
+    
+    switch (anim) {
+      // 上
+      case 'up':
+        sword.addChildTo(this.underSword).setRotation(0);
+        collision.setPosition(0, -GRID_SIZE / 2).setSize(GRID_SIZE / 4, GRID_SIZE);
+        break;
+      // 下
+      case 'down':
+        sword.addChildTo(this.overSword).setRotation(180);
+        collision.setPosition(0, GRID_SIZE / 2).setSize(GRID_SIZE / 4, GRID_SIZE);
+        break;
+      // 左
+      case 'left':
+        sword.addChildTo(this.overSword).setRotation(-90);
+        collision.setPosition(-GRID_SIZE / 2, 8).setSize(GRID_SIZE, GRID_SIZE / 4);
+        break;
+      // 右
+      case 'right':
+        sword.addChildTo(this.underSword).setRotation(90);
+        collision.setPosition(GRID_SIZE / 2, 8).setSize(GRID_SIZE, GRID_SIZE / 4);
+        break;
+    }
+    // 剣アニメーション
+    sword.tweener.clear().set({visible: true, scaleY: 1.0})
+                         .call(function() {
+                           // 盾位置変更
+                           this.showShield();
+                         }, this)
+                         .wait(150)
+                         .to({scaleY: 0.1}, 100)
+                         .set({visible: false})
+                         .call(function() {
+                           sword.hit = false;
+                           // 盾を戻す
+                           this.showShield();
+                         }, this);
+    // 
+    //collision.tweener.clear().set({visible: true})
+    //                         .wait(250)
+    //                         .set({visible: false});
+  },
+  // 剣の当たり判定矩形を絶対座標で返す
+  getAbsoluteSwordRect: function() {
+    var collision = this.swordCollision;
+    var x = collision.x + this.x;
+    var y = collision.y + this.y;
+    var w = collision.width;
+    var h = collision.height;
+
+    return Rect(x - w / 2, y - h / 2, w, h);
+  },
+  // 盾の表示処理
+  showShield: function() {
+    var anim = this.sprite.anim.currentAnimationName;
+    
+    switch (anim) {
+      // 上向き
+      case 'up':
+        // 剣攻撃時とそれ以外
+        this.sword.visible ? this.shieldRight() : this.shieldUp();
+        break;
+      // 下向き
+      case 'down':
+        this.sword.visible ? this.shieldLeft() : this.shieldDown();
+        break;
+      // 左向き
+      case 'left':
+        this.sword.visible ? this.shieldUp() : this.shieldLeft();
+        break;
+      // 右向き
+      case 'right':
+        this.sword.visible ? this.shieldDown() : this.shieldRight();
+        break;
+    }
+  },
+  // 上方向盾表示
+  shieldUp: function() {
+    this.shield.addChildTo(this.underShield).setPosition(10, 14).setFrameIndex(0);
+  },
+  // 下方向盾表示
+  shieldDown: function() {
+    this.shield.addChildTo(this.overShield).setPosition(-10, 14).setFrameIndex(0);
+  },
+  // 左方向盾表示
+  shieldLeft: function() {
+    this.shield.addChildTo(this.overShield).setPosition(-18, 14).setFrameIndex(1);
+  },
+  // 右方向盾表示
+  shieldRight: function() {
+    this.shield.addChildTo(this.overShield).setPosition(18, 14).setFrameIndex(1);
+  },
+});
+/*
+ * プレイヤースプライトクラス
+ */
+phina.define("PlayerSprite", {
+  // 継承
+  superClass: 'Sprite',
+  // コンストラクタ
+  init: function() {
+    // 親クラス初期化
+    this.superInit('tomapiko', GRID_SIZE, GRID_SIZE);
+    // スプライトにフレームアニメーションをアタッチ
+    this.anim = FrameAnimation('tomapiko_ss').attachTo(this);
+    // アニメーションを指定
+    this.anim.gotoAndStop('down');
+    //
+    this.defeated = false;
+    // やられイベント
+    this.one('defeat', function() {
+      this.defeated = true;
+      this.anim.gotoAndPlay('defeat');
+    }, this);
+  },
+});
+/*
+ * 剣クラス
+ */
+phina.define("Sword", {
+  // 継承
+  superClass: 'Sprite',
+  // コンストラクタ
+  init: function() {
+    // 親クラス初期化
+    this.superInit('sword', GRID_SIZE, GRID_SIZE);
+  },
+});
+/*
+ * 盾クラス
+ */
+phina.define("Shield", {
+  // 継承
+  superClass: 'Sprite',
+  // コンストラクタ
+  init: function() {
+    // 親クラス初期化
+    this.superInit('shield', GRID_SIZE / 2, GRID_SIZE / 2);
+  },
+});
+/*
+ * ブーメランクラス
+ */
+phina.define("Boomerang", {
+  // 継承
+  superClass: 'Sprite',
+  // コンストラクタ
+  init: function(player) {
+    // 親クラス初期化
+    this.superInit('boomerang', GRID_SIZE, GRID_SIZE);
+    // 速度
+    this.speed = 8;
+    // 飛行距離
+    this.distance = GRID_SIZE * 4;
+    // 回転速度
+    this.rot = 24;
+    //
+    var anim = player.sprite.anim.currentAnimationName;
+    //
+    var dir = { left: Vector2(-1,0), right: Vector2(1,0), up: Vector2(0,-1), down: Vector2(0,1) };
+    // 初期位置
+    this.setPosition(player.x, player.y);
+    // 発射位置
+    this.startPos = Vector2(player.x, player.y);
+    // 初期方向はプレイヤーの向き
+    this.vec = dir[anim];
+    // 折返しかどうか
+    this.turnBack = false;
+    // プレイヤーへの参照
+    this.player = player;
+  },
+  //
+  update: function() {
+    // 回転
+    this.rotation += this.rot;
+    // 往路
+    if (!this.turnBack) {
+      if (this.vec.x !== 0) {
+        // 飛行距離を超えたら折返しへ
+        if (Math.abs(this.x - this.startPos.x) > this.distance) { 
+          this.turnBack = true;
+        }
+      }
+      if (this.vec.y !== 0) {
+        if (Math.abs(this.y - this.startPos.y) > this.distance) {
+          this.turnBack = true;
+        }
+      }
+    }
+    // 復路
+    if (this.turnBack) {
+      // プレイヤーとの当たり判定
+      if (this.hitTestElement(this.player)) {
+        this.remove();
+      }
+      // プレイヤー方向のベクトル計算
+      this.vec = Vector2.sub(this.player.position, this.position);
+    }
+    // 正規化して速度を一定にする
+    var v = this.vec.normalize().mul(this.speed);
+    // 移動
+    this.moveBy(v.x, v.y);
+  },
+});
+/*
+ * 矢クラス
+ */
+phina.define("Arrow", {
+  // 継承
+  superClass: 'Sprite',
+  // コンストラクタ
+  init: function(player) {
+    // 親クラス初期化
+    this.superInit('arrow', GRID_SIZE, GRID_SIZE);
+    // 速度
+    this.speed = 16;
+    //
+    var anim = player.sprite.anim.currentAnimationName;
+    //
+    var dir = { left: [Vector2(-1,0), -90], right: [Vector2(1,0), 90], up: [Vector2(0,-1), 0], down: [Vector2(0,1), 180] };
+    // 初期位置
+    this.setPosition(player.x, player.y);
+    // 初期方向はプレイヤーの向き
+    this.vec = dir[anim][0];
+    this.rotation = dir[anim][1];
+    //
+    this.physical.velocity = Vector2.mul(this.vec, this.speed);
+    // プレイヤーへの参照
+    this.player = player;
+  },
+});
+/*
+ * メイン処理
+ */
+phina.main(function() {
+  // アプリケーションを生成
+  var app = GameApp({
+    // MainScene から開始
+    //startLabel: 'main',
+    // アセット読み込み
+    assets: ASSETS,
+  });
+  // 実行
+  app.run();
+});</script>
+  </body>
+</html>
+
